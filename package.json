@@ -1,0 +1,17 @@
+{
+  "name": "wezzy-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for Sellapp order verification",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}
