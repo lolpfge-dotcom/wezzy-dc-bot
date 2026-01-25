@@ -253,39 +253,52 @@ const restockButton = new ButtonBuilder()
   }
 
   if (message.content.startsWith("!announce-restock") && message.member.permissions.has("Administrator")) {
-    const args = message.content.slice("!announce-restock".length).trim().split(/ +/);
-    const product = args[0] || "Product";
-    const link = args[1] || "";
+  const args = message.content.slice("!announce-restock".length).trim().split(/ +/);
+  let product = args[0] || "Product";
+  let link = args[1] || "";
 
-    const role = message.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
-    if (!role) {
-      await message.reply("❌ Restock role not found.");
-      return;
+  // Handle quoted product names with spaces (e.g. !announce-restock "Cool Script v2" https://...)
+  if (product.startsWith('"') || product.startsWith("'")) {
+    const endQuoteIndex = message.content.indexOf(product[0], "!announce-restock".length + product.length);
+    if (endQuoteIndex > -1) {
+      product = message.content.slice("!announce-restock".length + 1, endQuoteIndex).trim();
+      link = message.content.slice(endQuoteIndex + 1).trim();
     }
-
-    const embed = new EmbedBuilder()
-      .setColor("#ff8800")
-      .setTitle("🛒 RESTOCK ALERT!")
-      .setDescription(`**${product}** is now available again!`)
-      .setTimestamp()
-      .setFooter({ text: "wezzy.store - Premium Roblox Scripts" });
-
-    if (link) {
-      embed.addFields({ name: "Link", value: link, inline: false });
-    }
-
-    const channel = CONFIG.ANNOUNCEMENT_CHANNEL_ID
-      ? message.guild.channels.cache.get(CONFIG.ANNOUNCEMENT_CHANNEL_ID)
-      : message.channel;
-
-    if (!channel) {
-      await message.reply("❌ Announcement channel not found.");
-      return;
-    }
-
-    await channel.send({ content: `${role.mention}`, embeds: [embed] });
-    await message.reply("✅ Announcement sent!");
   }
+
+  const role = message.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
+  if (!role) {
+    return message.reply("❌ Restock role not found.");
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor("#ff8800")
+    .setTitle("🛒 RESTOCK ALERT!")
+    .setDescription(`**${product}** is now available again!`)
+    .setTimestamp()
+    .setFooter({ text: "wezzy.store - Premium cheats" });
+
+  if (link) {
+    embed.addFields({ name: "Link", value: `[Grab it here](${link})`, inline: false });
+  }
+
+  const channel = CONFIG.ANNOUNCEMENT_CHANNEL_ID
+    ? message.guild.channels.cache.get(CONFIG.ANNOUNCEMENT_CHANNEL_ID)
+    : message.channel;
+
+  if (!channel) {
+    return message.reply("❌ Announcement channel not found.");
+  }
+
+  // Send clean: role mention + embed only (no extra text)
+  await channel.send({
+    content: role.toString(),           // just the mention (pings users)
+    embeds: [embed],
+    allowedMentions: { parse: ['roles'] }  // only parse roles, suppress @everyone/@here if any
+  });
+
+  await message.reply({ content: "✅ Announcement sent!", ephemeral: true });
+}
 });
 
 client.login(process.env.DISCORD_BOT_TOKEN);
