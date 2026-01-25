@@ -192,41 +192,45 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", async (message) => {
   // Setup panel
   if (message.content === "!setup-panel" && message.member.permissions.has("Administrator")) {
-    const embed = new EmbedBuilder()
-      .setColor("#101418")
-      .setTitle("Order Verification")
-      .setDescription(
-        "Verify your purchase to access exclusive buyer channels.\n\n" +
-        "**How to verify**\n" +
-        "1. Click **Verify Order**\n" +
-        "2. Enter your Sellapp Order ID\n" +
-        "3. Receive buyer role instantly\n\n" +
-        "**Finding your Order ID**\n" +
-        "• Sellapp purchase email receipt\n" +
-        "• Sellapp order history\n" +
-        "• Invoice number in dashboard\n\n" +
-        "Subscribe to restock alerts below to be notified instantly when items become available again."
-      )
-      .setThumbnail(https://imgur.com/a/nz53254)
-      .setFooter({ text: "wezzy.store • Premium Cheats" })
-      .setTimestamp();
+const embed = new EmbedBuilder()
+  .setColor("#101418")
+  .setTitle("Order Verification")
+  .setDescription(
+    "Welcome to **wezzy.store**\n" +
+    "Verify your purchase to access exclusive buyer channels.\n\n" +
 
-    const verifyButton = new ButtonBuilder()
-      .setCustomId("verify_order")
-      .setLabel("Verify Order")
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji("🔑");
+    "**How to verify**\n" +
+    "1. Click **Verify Order**\n" +
+    "2. Enter your Sellapp Order ID\n" +
+    "3. Receive buyer role instantly\n\n" +
 
-    const restockButton = new ButtonBuilder()
-      .setCustomId("subscribe_restock")
-      .setLabel("Restock Alerts")
-      .setStyle(ButtonStyle.Primary)
-      .setEmoji("🔔");
+    "**Finding your Order ID**\n" +
+    "• Sellapp purchase email receipt\n" +
+    "• Sellapp order history\n" +
+    "• Invoice number in dashboard\n\n" +
 
-    const row = new ActionRowBuilder().addComponents(verifyButton, restockButton);
+    "Subscribe to restock alerts below to be notified instantly when items become available again."
+  )
+  .setThumbnail("https://imgur.com/a/nz53254")
+  .setFooter({ text: "wezzy.store • Premium Cheats" })
+  .setTimestamp();
 
-    await message.channel.send({ embeds: [embed], components: [row] });
-    await message.delete().catch(() => {});
+const verifyButton = new ButtonBuilder()
+  .setCustomId("verify_order")
+  .setLabel("Verify Order")
+  .setStyle(ButtonStyle.Secondary)
+  .setEmoji("🔑");
+
+const restockButton = new ButtonBuilder()
+  .setCustomId("subscribe_restock")
+  .setLabel("Restock Alerts")
+  .setStyle(ButtonStyle.Primary)
+  .setEmoji("🔔");
+
+const row = new ActionRowBuilder().addComponents(verifyButton, restockButton);
+
+await message.channel.send({ embeds: [embed], components: [row] });
+await message.delete().catch(() => {});
   }
 
   // Restock announcement
