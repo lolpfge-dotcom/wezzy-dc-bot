@@ -98,6 +98,23 @@ client.on("interactionCreate", async (interaction) => {
     modal.addComponents(row)
 
     await interaction.showModal(modal)
+  }  
+  // Restock button handler – add this whole block
+  if (interaction.customId === "subscribe_restock") {
+    const member = interaction.member;
+    const role = interaction.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
+
+    if (!role) {
+      return interaction.reply({ content: "❌ Restock role not found. Contact admin.", ephemeral: true });
+    }
+
+    if (member.roles.cache.has(CONFIG.RESTOCK_ROLE_ID)) {
+      await member.roles.remove(role);
+      await interaction.reply({ content: "🔔 Restock notifications turned OFF.", ephemeral: true });
+    } else {
+      await member.roles.add(role);
+      await interaction.reply({ content: "🔔 You will now get pinged on restocks! (Click again to unsubscribe)", ephemeral: true });
+    }
   }
 
   // Modal submitted
