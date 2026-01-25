@@ -196,7 +196,6 @@ client.on("messageCreate", async (message) => {
       .setColor("#101418")
       .setTitle("Order Verification")
       .setDescription(
-        "Welcome to **wezzy.store**\n" +
         "Verify your purchase to access exclusive buyer channels.\n\n" +
         "**How to verify**\n" +
         "1. Click **Verify Order**\n" +
@@ -208,7 +207,7 @@ client.on("messageCreate", async (message) => {
         "• Invoice number in dashboard\n\n" +
         "Subscribe to restock alerts below to be notified instantly when items become available again."
       )
-      .setThumbnail(null) // ← add your logo URL here later
+      .setThumbnail(https://imgur.com/a/nz53254)
       .setFooter({ text: "wezzy.store • Premium Cheats" })
       .setTimestamp();
 
