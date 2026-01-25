@@ -222,9 +222,9 @@ client.on("messageCreate", async (message) => {
 
     "Subscribe to restock alerts below to be notified instantly when items become available again."
   )
-  .setThumbnail(https://imgur.com/a/nz53254)
+  .setThumbnail(null)
   .setFooter({ 
-    text: "wezzy.store • Premium cheats",
+    text: "wezzy.store • Premium Roblox Scripts",
     iconURL: "YOUR_LOGO_URL"               // optional small logo
   })
   .setTimestamp();
