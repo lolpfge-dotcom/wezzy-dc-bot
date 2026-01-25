@@ -253,29 +253,32 @@ const restockButton = new ButtonBuilder()
   }
 
   if (message.content.startsWith("!announce-restock") && message.member.permissions.has("Administrator")) {
-  let contentAfterCommand = message.content.slice("!announce-restock".length).trim();
 
-  // Extract product and link more robustly
+  // Automatically delete the command message
+  await message.delete().catch(() => {});
+
+  // Parse product and link (your existing code or improved version)
+  let contentAfter = message.content.slice("!announce-restock".length).trim();
   let product = "Product";
   let link = "";
 
-  // If first word is quoted
-  if (contentAfterCommand.startsWith('"') || contentAfterCommand.startsWith("'")) {
-    const quoteChar = contentAfterCommand[0];
-    const endQuote = contentAfterCommand.indexOf(quoteChar, 1);
-    if (endQuote !== -1) {
-      product = contentAfterCommand.slice(1, endQuote).trim();
-      link = contentAfterCommand.slice(endQuote + 1).trim();
+  if (contentAfter.startsWith('"') || contentAfter.startsWith("'")) {
+    const quote = contentAfter[0];
+    const end = contentAfter.indexOf(quote, 1);
+    if (end !== -1) {
+      product = contentAfter.slice(1, end).trim();
+      link = contentAfter.slice(end + 1).trim();
     }
   } else {
-    const parts = contentAfterCommand.split(/\s+/);
-    product = parts[0] || "Product";
+    const parts = contentAfter.split(/\s+/);
+    product = parts[0];
     link = parts.slice(1).join(" ").trim();
   }
 
-  const role = message.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
+  const roleId = CONFIG.RESTOCK_ROLE_ID;
+  const role = message.guild.roles.cache.get(roleId);
   if (!role) {
-    return message.reply("❌ Restock role not found.");
+    return message.reply({ content: "❌ Restock role not found.", ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
@@ -286,20 +289,15 @@ const restockButton = new ButtonBuilder()
     .setFooter({ text: "wezzy.store • Premium Cheats" });
 
   if (link) {
-    // Clean link
     link = link.replace(/^["']|["']$/g, '').trim();
     if (link.startsWith('http')) {
       embed.addFields({
         name: "Link",
-        value: `[Grab it here](${link})`,
+        value: `[Click to grab it](${link})`,
         inline: false
       });
     } else {
-      embed.addFields({
-        name: "Link",
-        value: link,
-        inline: false
-      });
+      embed.setDescription(embed.data.description + `\n\nLink: ${link}`);
     }
   }
 
@@ -308,19 +306,22 @@ const restockButton = new ButtonBuilder()
     : message.channel;
 
   if (!channel) {
-    return message.reply("❌ Announcement channel not found.");
+    return message.reply({ content: "❌ Announcement channel not found.", ephemeral: true });
   }
 
   await channel.send({
-    content: role.toString(),
     embeds: [embed],
-    allowedMentions: { parse: ['roles'] }
+    allowedMentions: {
+      parse: [],
+      roles: [roleId]
+    }
   });
 
+  // Optional: still send private confirmation to you
   await message.reply({ 
-  content: "✅ Announcement sent!", 
-  ephemeral: true
-});
+    content: "✅ Announcement sent!", 
+    ephemeral: true 
+  }).catch(() => {});  // also catch errors here
 }
 
 client.login(process.env.DISCORD_BOT_TOKEN);
