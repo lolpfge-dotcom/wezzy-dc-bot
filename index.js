@@ -299,18 +299,19 @@ client.on("messageCreate", async (message) => {
       return message.reply({ content: "❌ Announcement channel not found.", flags: 64 });
     }
 
-    await channel.send({
-      embeds: [embed],
-      allowedMentions: {
-        parse: [],
-        roles: [roleId]
-      }
-    });
+await channel.send({
+  embeds: [embed],
+  allowedMentions: {
+    parse: [],
+    roles: [CONFIG.RESTOCK_ROLE_ID]
+  }
+});
 
-    await message.reply({ 
-      content: "✅ Announcement sent!", 
-      flags: 64 
-    }).catch(() => {});
+// Private confirmation for you only
+await message.reply({ 
+  content: "✅ Announcement sent!", 
+  ephemeral: true 
+}).catch(() => {});
   }
 });
 
