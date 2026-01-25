@@ -8,6 +8,7 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  MessageFlagsBits,
 } = require("discord.js");
 require("dotenv").config();
 
@@ -81,10 +82,13 @@ client.on("ready", () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton() && !interaction.isModalSubmit()) return;
 
-  // Verify button – defer immediately
+  // Verify button
   if (interaction.customId === "verify_order") {
-    await interaction.deferReply({ flags: 64 }); // ephemeral
-    const modal = new ModalBuilder().setCustomId("order_verification_modal").setTitle("Order Verification");
+    await interaction.deferReply({ flags: MessageFlagsBits.Ephemeral });
+
+    const modal = new ModalBuilder()
+      .setCustomId("order_verification_modal")
+      .setTitle("Order Verification");
 
     const orderIdInput = new TextInputBuilder()
       .setCustomId("order_id")
@@ -95,14 +99,13 @@ client.on("interactionCreate", async (interaction) => {
       .setMinLength(5)
       .setMaxLength(50);
 
-    const row = new ActionRowBuilder().addComponents(orderIdInput);
-    modal.addComponents(row);
+    modal.addComponents(new ActionRowBuilder().addComponents(orderIdInput));
 
     await interaction.showModal(modal);
     return;
   }
 
-  // Restock notification toggle
+  // Restock toggle
   if (interaction.customId === "subscribe_restock") {
     await interaction.deferUpdate();
 
@@ -110,23 +113,26 @@ client.on("interactionCreate", async (interaction) => {
     const role = interaction.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
 
     if (!role) {
-      await interaction.editReply({ content: "❌ Restock role not found.", flags: 64 });
+      await interaction.editReply({ content: "❌ Restock role not found.", flags: MessageFlagsBits.Ephemeral });
       return;
     }
 
     if (member.roles.cache.has(CONFIG.RESTOCK_ROLE_ID)) {
       await member.roles.remove(role);
-      await interaction.editReply({ content: "🔔 Restock notifications turned OFF.", flags: 64 });
+      await interaction.editReply({ content: "🔔 Restock notifications turned OFF.", flags: MessageFlagsBits.Ephemeral });
     } else {
       await member.roles.add(role);
-      await interaction.editReply({ content: "🔔 You will now get pinged on restocks! (Click again to unsubscribe)", flags: 64 });
+      await interaction.editReply({
+        content: "🔔 You will now get pinged on restocks! (Click again to unsubscribe)",
+        flags: MessageFlagsBits.Ephemeral,
+      });
     }
     return;
   }
 
-  // Modal submitted for verification
+  // Modal submit (verification)
   if (interaction.customId === "order_verification_modal") {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply({ flags: MessageFlagsBits.Ephemeral });
 
     const orderId = interaction.fields.getTextInputValue("order_id");
 
@@ -137,38 +143,29 @@ client.on("interactionCreate", async (interaction) => {
           const role = interaction.guild.roles.cache.get(CONFIG.BUYER_ROLE_ID);
 
           if (!role) {
-            await interaction.editReply({ content: "❌ Error: Buyer role not found. Please contact an administrator.", flags: 64 });
+            await interaction.editReply({ content: "❌ Buyer role not found.", flags: MessageFlagsBits.Ephemeral });
             return;
           }
 
           if (member.roles.cache.has(CONFIG.BUYER_ROLE_ID)) {
-            await interaction.editReply({ content: "✅ You already have the buyer role!", flags: 64 });
+            await interaction.editReply({ content: "✅ You already have the buyer role!", flags: MessageFlagsBits.Ephemeral });
             return;
           }
 
-          try {
-            await member.roles.add(role);
+          await member.roles.add(role);
 
-            const successEmbed = new EmbedBuilder()
-              .setColor("#00ff00")
-              .setTitle("✅ Verification Successful!")
-              .setDescription(`Your order has been verified!\n\nYou've been given the **${role.name}** role.`)
-              .addFields(
-                { name: "Order ID", value: orderId, inline: true },
-                { name: "Status", value: "Verified", inline: true },
-              )
-              .setTimestamp();
+          const successEmbed = new EmbedBuilder()
+            .setColor("#00ff00")
+            .setTitle("✅ Verification Successful!")
+            .setDescription(`Your order has been verified!\n\nYou've been given the **${role.name}** role.`)
+            .addFields(
+              { name: "Order ID", value: orderId, inline: true },
+              { name: "Status", value: "Verified", inline: true },
+            )
+            .setTimestamp();
 
-            await interaction.editReply({
-              embeds: [successEmbed],
-              flags: 64
-            });
-
-            console.log(`✅ Verified user ${interaction.user.tag} with order ${orderId}`);
-          } catch (error) {
-            console.error("Error assigning role:", error);
-            await interaction.editReply({ content: "❌ Error assigning role. Please contact an administrator.", flags: 64 });
-          }
+          await interaction.editReply({ embeds: [successEmbed], flags: MessageFlagsBits.Ephemeral });
+          console.log(`✅ Verified ${interaction.user.tag} with order ${orderId}`);
         } else {
           const errorEmbed = new EmbedBuilder()
             .setColor("#ff0000")
@@ -181,23 +178,19 @@ client.on("interactionCreate", async (interaction) => {
             .setFooter({ text: "Make sure your order is completed and the ID is correct." })
             .setTimestamp();
 
-          await interaction.editReply({
-            embeds: [errorEmbed],
-            flags: 64
-          });
-
+          await interaction.editReply({ embeds: [errorEmbed], flags: MessageFlagsBits.Ephemeral });
           console.log(`❌ Failed verification for ${interaction.user.tag} with order ${orderId}`);
         }
       })
       .catch((error) => {
         console.error("Verification error:", error);
-        interaction.editReply({ content: "❌ An error occurred during verification.", flags: 64 }).catch(() => {});
+        interaction.editReply({ content: "❌ An error occurred.", flags: MessageFlagsBits.Ephemeral }).catch(() => {});
       });
   }
 });
 
-// Commands
 client.on("messageCreate", async (message) => {
+  // Setup panel
   if (message.content === "!setup-panel" && message.member.permissions.has("Administrator")) {
     const embed = new EmbedBuilder()
       .setColor("#101418")
@@ -205,20 +198,17 @@ client.on("messageCreate", async (message) => {
       .setDescription(
         "Welcome to **wezzy.store**\n" +
         "Verify your purchase to access exclusive buyer channels.\n\n" +
-
         "**How to verify**\n" +
         "1. Click **Verify Order**\n" +
         "2. Enter your Sellapp Order ID\n" +
         "3. Receive buyer role instantly\n\n" +
-
         "**Finding your Order ID**\n" +
         "• Sellapp purchase email receipt\n" +
         "• Sellapp order history\n" +
         "• Invoice number in dashboard\n\n" +
-
         "Subscribe to restock alerts below to be notified instantly when items become available again."
       )
-      .setThumbnail(null) // change to your logo URL when ready
+      .setThumbnail(null) // ← add your logo URL here later
       .setFooter({ text: "wezzy.store • Premium Cheats" })
       .setTimestamp();
 
@@ -236,15 +226,11 @@ client.on("messageCreate", async (message) => {
 
     const row = new ActionRowBuilder().addComponents(verifyButton, restockButton);
 
-    await message.channel.send({
-      embeds: [embed],
-      components: [row],
-    });
-
+    await message.channel.send({ embeds: [embed], components: [row] });
     await message.delete().catch(() => {});
-    console.log("✅ Verification panel created!");
   }
 
+  // Restock announcement
   if (message.content.startsWith("!announce-restock") && message.member.permissions.has("Administrator")) {
     await message.delete().catch(() => {});
 
@@ -268,7 +254,7 @@ client.on("messageCreate", async (message) => {
     const roleId = CONFIG.RESTOCK_ROLE_ID;
     const role = message.guild.roles.cache.get(roleId);
     if (!role) {
-      return message.reply({ content: "❌ Restock role not found.", flags: 64 });
+      return message.reply({ content: "❌ Restock role not found.", flags: MessageFlagsBits.Ephemeral });
     }
 
     const embed = new EmbedBuilder()
@@ -296,22 +282,21 @@ client.on("messageCreate", async (message) => {
       : message.channel;
 
     if (!channel) {
-      return message.reply({ content: "❌ Announcement channel not found.", flags: 64 });
+      return message.reply({ content: "❌ Announcement channel not found.", flags: MessageFlagsBits.Ephemeral });
     }
 
-await channel.send({
-  embeds: [embed],
-  allowedMentions: {
-    parse: [],
-    roles: [CONFIG.RESTOCK_ROLE_ID]
-  }
-});
+    // Send with VISIBLE @role mention + clean embed
+    await channel.send({
+      content: `<@&${roleId}>`,
+      embeds: [embed],
+      allowedMentions: { parse: ['roles'] }
+    });
 
-// Private confirmation for you only
-await message.reply({ 
-  content: "✅ Announcement sent!", 
-  ephemeral: true 
-}).catch(() => {});
+    // Private confirmation for you only
+    await message.reply({
+      content: "✅ Announcement sent!",
+      flags: MessageFlagsBits.Ephemeral
+    }).catch(() => {});
   }
 });
 
