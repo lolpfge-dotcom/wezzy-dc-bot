@@ -22,11 +22,13 @@ const client = new Client({
 
 // Configuration
 const CONFIG = {
-  BUYER_ROLE_ID: process.env.BUYER_ROLE_ID,
+  BUYER_ROLE_ID:           process.env.BUYER_ROLE_ID,
   VERIFICATION_CHANNEL_ID: process.env.VERIFICATION_CHANNEL_ID,
-  SELLAPP_API_KEY: process.env.SELLAPP_API_KEY,
-  SELLAPP_STORE_ID: process.env.SELLAPP_STORE_ID,
-}
+  SELLAPP_API_KEY:         process.env.SELLAPP_API_KEY,
+  SELLAPP_STORE_ID:        process.env.SELLAPP_STORE_ID,
+  RESTOCK_ROLE_ID:         process.env.RESTOCK_ROLE_ID,
+  ANNOUNCEMENT_CHANNEL_ID: process.env.ANNOUNCEMENT_CHANNEL_ID,
+};
 
 // Verify order with Sellapp API
 async function verifyOrder(orderId) {
