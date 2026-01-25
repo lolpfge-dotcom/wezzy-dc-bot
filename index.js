@@ -196,7 +196,6 @@ const embed = new EmbedBuilder()
   .setColor("#101418")
   .setTitle("Order Verification")
   .setDescription(
-    "Welcome to **wezzy.store**\n" +
     "Verify your purchase to access exclusive buyer channels.\n\n" +
 
     "**How to verify**\n" +
@@ -211,7 +210,7 @@ const embed = new EmbedBuilder()
 
     "Subscribe to restock alerts below to be notified instantly when items become available again."
   )
-  .setThumbnail("https://imgur.com/a/nz53254")
+  .setThumbnail(null)
   .setFooter({ text: "wezzy.store • Premium Cheats" })
   .setTimestamp();
 
