@@ -279,8 +279,24 @@ const restockButton = new ButtonBuilder()
     .setFooter({ text: "wezzy.store - Premium cheats" });
 
   if (link) {
-    embed.addFields({ name: "Link", value: `[Grab it here](${link})`, inline: false });
+  // Clean the link: remove any extra quotes or spaces
+  link = link.replace(/^["']|["']$/g, '').trim();
+  
+  // Make sure it's a valid URL (basic check)
+  if (link.startsWith('http://') || link.startsWith('https://')) {
+    embed.addFields({
+      name: "Link",
+      value: `[Grab it here](${link})`,
+      inline: false
+    });
+  } else {
+    embed.addFields({
+      name: "Link",
+      value: link,  // fallback: just show raw link if invalid
+      inline: false
+    });
   }
+}
 
   const channel = CONFIG.ANNOUNCEMENT_CHANNEL_ID
     ? message.guild.channels.cache.get(CONFIG.ANNOUNCEMENT_CHANNEL_ID)
