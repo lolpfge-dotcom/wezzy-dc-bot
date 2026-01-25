@@ -254,32 +254,9 @@ const restockButton = new ButtonBuilder()
 
   if (message.content.startsWith("!announce-restock") && message.member.permissions.has("Administrator")) {
 
-  // Automatically delete the command message
   await message.delete().catch(() => {});
 
-  // Parse product and link (your existing code or improved version)
-  let contentAfter = message.content.slice("!announce-restock".length).trim();
-  let product = "Product";
-  let link = "";
-
-  if (contentAfter.startsWith('"') || contentAfter.startsWith("'")) {
-    const quote = contentAfter[0];
-    const end = contentAfter.indexOf(quote, 1);
-    if (end !== -1) {
-      product = contentAfter.slice(1, end).trim();
-      link = contentAfter.slice(end + 1).trim();
-    }
-  } else {
-    const parts = contentAfter.split(/\s+/);
-    product = parts[0];
-    link = parts.slice(1).join(" ").trim();
-  }
-
-  const roleId = CONFIG.RESTOCK_ROLE_ID;
-  const role = message.guild.roles.cache.get(roleId);
-  if (!role) {
-    return message.reply({ content: "❌ Restock role not found.", ephemeral: true });
-  }
+  // ... all your parsing code ...
 
   const embed = new EmbedBuilder()
     .setColor("#ff8800")
@@ -313,15 +290,15 @@ const restockButton = new ButtonBuilder()
     embeds: [embed],
     allowedMentions: {
       parse: [],
-      roles: [roleId]
+      roles: [CONFIG.RESTOCK_ROLE_ID]
     }
   });
 
-  // Optional: still send private confirmation to you
+  // Optional private confirmation
   await message.reply({ 
     content: "✅ Announcement sent!", 
     ephemeral: true 
-  }).catch(() => {});  // also catch errors here
+  }).catch(() => {});
 }
 
 client.login(process.env.DISCORD_BOT_TOKEN);
