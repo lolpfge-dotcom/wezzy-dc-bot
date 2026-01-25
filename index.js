@@ -220,21 +220,30 @@ client.on("messageCreate", async (message) => {
       .setFooter({ text: "wezzy.store - Premium Roblox Scripts" })
       .setTimestamp()
 
-    const button = new ButtonBuilder()
+    // Verify button (old one)
+    const verifyButton = new ButtonBuilder()
       .setCustomId("verify_order")
       .setLabel("Verify Order")
       .setStyle(ButtonStyle.Success)
-      .setEmoji("✅")
+      .setEmoji("✅");
 
-    const row = new ActionRowBuilder().addComponents(button)
+    // New restock button – this is what you asked for
+    const restockButton = new ButtonBuilder()
+      .setCustomId("subscribe_restock")
+      .setLabel("Restock Notifications")
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji("🔔");
+
+    // Row with BOTH buttons
+    const row = new ActionRowBuilder().addComponents(verifyButton, restockButton);
 
     await message.channel.send({
       embeds: [embed],
       components: [row],
-    })
+    });
 
-    await message.delete()
-    console.log("✅ Verification panel created!")
+    await message.delete();
+    console.log("✅ Verification panel created with restock button!");
   }
 })
 
