@@ -84,7 +84,6 @@ client.on("interactionCreate", async (interaction) => {
 
   // Verify button - opens modal
   if (interaction.customId === "verify_order") {
-    // IMPORTANT: NO deferReply() here! showModal() handles the acknowledgement
     const modal = new ModalBuilder()
       .setCustomId("order_verification_modal")
       .setTitle("Order Verification");
@@ -104,7 +103,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // Restock toggle
+  // Restock toggle - now shows notification BELOW the panel
   if (interaction.customId === "subscribe_restock") {
     await interaction.deferUpdate();
 
@@ -112,21 +111,27 @@ client.on("interactionCreate", async (interaction) => {
     const role = interaction.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
 
     if (!role) {
-      await interaction.editReply({ content: "❌ Restock role not found.", flags: MessageFlags.Ephemeral });
+      await interaction.followUp({
+        content: "❌ Restock role not found.",
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
+    let statusText = "";
     if (member.roles.cache.has(CONFIG.RESTOCK_ROLE_ID)) {
       await member.roles.remove(role);
-      await interaction.editReply({ content: "🔔 Restock notifications turned OFF.", flags: MessageFlags.Ephemeral });
+      statusText = "🔔 Restock notifications turned **OFF**.";
     } else {
       await member.roles.add(role);
-      await interaction.editReply({
-        content: "🔔 You will now get pinged on restocks! (Click again to unsubscribe)",
-        flags: MessageFlags.Ephemeral,
-      });
+      statusText = "🔔 Restock notifications turned **ON**! You'll get pinged on restocks.";
     }
-    return;
+
+    // Show short ephemeral notification BELOW the panel
+    await interaction.followUp({
+      content: statusText,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   // Modal submit (verification)
@@ -286,14 +291,12 @@ client.on("messageCreate", async (message) => {
       return message.reply({ content: "❌ Announcement channel not found.", flags: MessageFlags.Ephemeral });
     }
 
-    // Send with VISIBLE @role mention + clean embed
     await channel.send({
       content: `<@&${roleId}>`,
       embeds: [embed],
       allowedMentions: { parse: ['roles'] }
     });
 
-    // Private confirmation for you only
     await message.reply({
       content: "✅ Announcement sent!",
       flags: MessageFlags.Ephemeral
