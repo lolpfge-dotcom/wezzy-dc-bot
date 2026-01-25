@@ -8,7 +8,7 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  MessageFlagsBits,
+  MessageFlags,          // ← Changed from MessageFlagsBits to MessageFlags
 } = require("discord.js");
 require("dotenv").config();
 
@@ -84,7 +84,7 @@ client.on("interactionCreate", async (interaction) => {
 
   // Verify button
   if (interaction.customId === "verify_order") {
-    await interaction.deferReply({ flags: MessageFlagsBits.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const modal = new ModalBuilder()
       .setCustomId("order_verification_modal")
@@ -113,18 +113,18 @@ client.on("interactionCreate", async (interaction) => {
     const role = interaction.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
 
     if (!role) {
-      await interaction.editReply({ content: "❌ Restock role not found.", flags: MessageFlagsBits.Ephemeral });
+      await interaction.editReply({ content: "❌ Restock role not found.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (member.roles.cache.has(CONFIG.RESTOCK_ROLE_ID)) {
       await member.roles.remove(role);
-      await interaction.editReply({ content: "🔔 Restock notifications turned OFF.", flags: MessageFlagsBits.Ephemeral });
+      await interaction.editReply({ content: "🔔 Restock notifications turned OFF.", flags: MessageFlags.Ephemeral });
     } else {
       await member.roles.add(role);
       await interaction.editReply({
         content: "🔔 You will now get pinged on restocks! (Click again to unsubscribe)",
-        flags: MessageFlagsBits.Ephemeral,
+        flags: MessageFlags.Ephemeral,
       });
     }
     return;
@@ -132,7 +132,7 @@ client.on("interactionCreate", async (interaction) => {
 
   // Modal submit (verification)
   if (interaction.customId === "order_verification_modal") {
-    await interaction.deferReply({ flags: MessageFlagsBits.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const orderId = interaction.fields.getTextInputValue("order_id");
 
@@ -143,12 +143,12 @@ client.on("interactionCreate", async (interaction) => {
           const role = interaction.guild.roles.cache.get(CONFIG.BUYER_ROLE_ID);
 
           if (!role) {
-            await interaction.editReply({ content: "❌ Buyer role not found.", flags: MessageFlagsBits.Ephemeral });
+            await interaction.editReply({ content: "❌ Buyer role not found.", flags: MessageFlags.Ephemeral });
             return;
           }
 
           if (member.roles.cache.has(CONFIG.BUYER_ROLE_ID)) {
-            await interaction.editReply({ content: "✅ You already have the buyer role!", flags: MessageFlagsBits.Ephemeral });
+            await interaction.editReply({ content: "✅ You already have the buyer role!", flags: MessageFlags.Ephemeral });
             return;
           }
 
@@ -164,7 +164,7 @@ client.on("interactionCreate", async (interaction) => {
             )
             .setTimestamp();
 
-          await interaction.editReply({ embeds: [successEmbed], flags: MessageFlagsBits.Ephemeral });
+          await interaction.editReply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral });
           console.log(`✅ Verified ${interaction.user.tag} with order ${orderId}`);
         } else {
           const errorEmbed = new EmbedBuilder()
@@ -178,13 +178,13 @@ client.on("interactionCreate", async (interaction) => {
             .setFooter({ text: "Make sure your order is completed and the ID is correct." })
             .setTimestamp();
 
-          await interaction.editReply({ embeds: [errorEmbed], flags: MessageFlagsBits.Ephemeral });
+          await interaction.editReply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
           console.log(`❌ Failed verification for ${interaction.user.tag} with order ${orderId}`);
         }
       })
       .catch((error) => {
         console.error("Verification error:", error);
-        interaction.editReply({ content: "❌ An error occurred.", flags: MessageFlagsBits.Ephemeral }).catch(() => {});
+        interaction.editReply({ content: "❌ An error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
       });
   }
 });
@@ -192,44 +192,44 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", async (message) => {
   // Setup panel
   if (message.content === "!setup-panel" && message.member.permissions.has("Administrator")) {
-const embed = new EmbedBuilder()
-  .setColor("#101418")
-  .setTitle("Order Verification")
-  .setDescription(
-    "Verify your purchase to access exclusive buyer channels.\n\n" +
+    const embed = new EmbedBuilder()
+      .setColor("#101418")
+      .setTitle("Order Verification")
+      .setDescription(
+        "Verify your purchase to access exclusive buyer channels.\n\n" +
 
-    "**How to verify**\n" +
-    "1. Click **Verify Order**\n" +
-    "2. Enter your Sellapp Order ID\n" +
-    "3. Receive buyer role instantly\n\n" +
+        "**How to verify**\n" +
+        "1. Click **Verify Order**\n" +
+        "2. Enter your Sellapp Order ID\n" +
+        "3. Receive buyer role instantly\n\n" +
 
-    "**Finding your Order ID**\n" +
-    "• Sellapp purchase email receipt\n" +
-    "• Sellapp order history\n" +
-    "• Invoice number in dashboard\n\n" +
+        "**Finding your Order ID**\n" +
+        "• Sellapp purchase email receipt\n" +
+        "• Sellapp order history\n" +
+        "• Invoice number in dashboard\n\n" +
 
-    "Subscribe to restock alerts below to be notified instantly when items become available again."
-  )
-  .setThumbnail(null)
-  .setFooter({ text: "wezzy.store • Premium Cheats" })
-  .setTimestamp();
+        "Subscribe to restock alerts below to be notified instantly when items become available again."
+      )
+      .setThumbnail(null)
+      .setFooter({ text: "wezzy.store • Premium Cheats" })
+      .setTimestamp();
 
-const verifyButton = new ButtonBuilder()
-  .setCustomId("verify_order")
-  .setLabel("Verify Order")
-  .setStyle(ButtonStyle.Secondary)
-  .setEmoji("🔑");
+    const verifyButton = new ButtonBuilder()
+      .setCustomId("verify_order")
+      .setLabel("Verify Order")
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji("🔑");
 
-const restockButton = new ButtonBuilder()
-  .setCustomId("subscribe_restock")
-  .setLabel("Restock Alerts")
-  .setStyle(ButtonStyle.Primary)
-  .setEmoji("🔔");
+    const restockButton = new ButtonBuilder()
+      .setCustomId("subscribe_restock")
+      .setLabel("Restock Alerts")
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji("🔔");
 
-const row = new ActionRowBuilder().addComponents(verifyButton, restockButton);
+    const row = new ActionRowBuilder().addComponents(verifyButton, restockButton);
 
-await message.channel.send({ embeds: [embed], components: [row] });
-await message.delete().catch(() => {});
+    await message.channel.send({ embeds: [embed], components: [row] });
+    await message.delete().catch(() => {});
   }
 
   // Restock announcement
@@ -256,7 +256,7 @@ await message.delete().catch(() => {});
     const roleId = CONFIG.RESTOCK_ROLE_ID;
     const role = message.guild.roles.cache.get(roleId);
     if (!role) {
-      return message.reply({ content: "❌ Restock role not found.", flags: MessageFlagsBits.Ephemeral });
+      return message.reply({ content: "❌ Restock role not found.", flags: MessageFlags.Ephemeral });
     }
 
     const embed = new EmbedBuilder()
@@ -284,7 +284,7 @@ await message.delete().catch(() => {});
       : message.channel;
 
     if (!channel) {
-      return message.reply({ content: "❌ Announcement channel not found.", flags: MessageFlagsBits.Ephemeral });
+      return message.reply({ content: "❌ Announcement channel not found.", flags: MessageFlags.Ephemeral });
     }
 
     // Send with VISIBLE @role mention + clean embed
@@ -297,7 +297,7 @@ await message.delete().catch(() => {});
     // Private confirmation for you only
     await message.reply({
       content: "✅ Announcement sent!",
-      flags: MessageFlagsBits.Ephemeral
+      flags: MessageFlags.Ephemeral
     }).catch(() => {});
   }
 });
