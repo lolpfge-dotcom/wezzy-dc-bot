@@ -317,7 +317,10 @@ const restockButton = new ButtonBuilder()
     allowedMentions: { parse: ['roles'] }
   });
 
-  await message.reply({ content: "✅ Announcement sent!", ephemeral: true });
+  await message.reply({ 
+  content: "✅ Announcement sent!", 
+  ephemeral: true
+});
 }
 
 client.login(process.env.DISCORD_BOT_TOKEN);
