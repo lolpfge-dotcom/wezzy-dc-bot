@@ -8,7 +8,7 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  MessageFlags,          // ← Changed from MessageFlagsBits to MessageFlags
+  MessageFlags,
 } = require("discord.js");
 require("dotenv").config();
 
@@ -82,10 +82,9 @@ client.on("ready", () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton() && !interaction.isModalSubmit()) return;
 
-  // Verify button
+  // Verify button - opens modal
   if (interaction.customId === "verify_order") {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
+    // IMPORTANT: NO deferReply() here! showModal() handles the acknowledgement
     const modal = new ModalBuilder()
       .setCustomId("order_verification_modal")
       .setTitle("Order Verification");
