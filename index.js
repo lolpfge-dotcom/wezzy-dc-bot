@@ -253,17 +253,24 @@ const restockButton = new ButtonBuilder()
   }
 
   if (message.content.startsWith("!announce-restock") && message.member.permissions.has("Administrator")) {
-  const args = message.content.slice("!announce-restock".length).trim().split(/ +/);
-  let product = args[0] || "Product";
-  let link = args[1] || "";
+  let contentAfterCommand = message.content.slice("!announce-restock".length).trim();
 
-  // Handle quoted product names with spaces (e.g. !announce-restock "Cool Script v2" https://...)
-  if (product.startsWith('"') || product.startsWith("'")) {
-    const endQuoteIndex = message.content.indexOf(product[0], "!announce-restock".length + product.length);
-    if (endQuoteIndex > -1) {
-      product = message.content.slice("!announce-restock".length + 1, endQuoteIndex).trim();
-      link = message.content.slice(endQuoteIndex + 1).trim();
+  // Extract product and link more robustly
+  let product = "Product";
+  let link = "";
+
+  // If first word is quoted
+  if (contentAfterCommand.startsWith('"') || contentAfterCommand.startsWith("'")) {
+    const quoteChar = contentAfterCommand[0];
+    const endQuote = contentAfterCommand.indexOf(quoteChar, 1);
+    if (endQuote !== -1) {
+      product = contentAfterCommand.slice(1, endQuote).trim();
+      link = contentAfterCommand.slice(endQuote + 1).trim();
     }
+  } else {
+    const parts = contentAfterCommand.split(/\s+/);
+    product = parts[0] || "Product";
+    link = parts.slice(1).join(" ").trim();
   }
 
   const role = message.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
@@ -276,27 +283,25 @@ const restockButton = new ButtonBuilder()
     .setTitle("🛒 RESTOCK ALERT!")
     .setDescription(`**${product}** is now available again!`)
     .setTimestamp()
-    .setFooter({ text: "wezzy.store - Premium cheats" });
+    .setFooter({ text: "wezzy.store • Premium Cheats" });
 
   if (link) {
-  // Clean the link: remove any extra quotes or spaces
-  link = link.replace(/^["']|["']$/g, '').trim();
-  
-  // Make sure it's a valid URL (basic check)
-  if (link.startsWith('http://') || link.startsWith('https://')) {
-    embed.addFields({
-      name: "Link",
-      value: `[Grab it here](${link})`,
-      inline: false
-    });
-  } else {
-    embed.addFields({
-      name: "Link",
-      value: link,  // fallback: just show raw link if invalid
-      inline: false
-    });
+    // Clean link
+    link = link.replace(/^["']|["']$/g, '').trim();
+    if (link.startsWith('http')) {
+      embed.addFields({
+        name: "Link",
+        value: `[Grab it here](${link})`,
+        inline: false
+      });
+    } else {
+      embed.addFields({
+        name: "Link",
+        value: link,
+        inline: false
+      });
+    }
   }
-}
 
   const channel = CONFIG.ANNOUNCEMENT_CHANNEL_ID
     ? message.guild.channels.cache.get(CONFIG.ANNOUNCEMENT_CHANNEL_ID)
@@ -306,15 +311,13 @@ const restockButton = new ButtonBuilder()
     return message.reply("❌ Announcement channel not found.");
   }
 
-  // Send clean: role mention + embed only (no extra text)
   await channel.send({
-    content: role.toString(),           // just the mention (pings users)
+    content: role.toString(),
     embeds: [embed],
-    allowedMentions: { parse: ['roles'] }  // only parse roles, suppress @everyone/@here if any
+    allowedMentions: { parse: ['roles'] }
   });
 
   await message.reply({ content: "✅ Announcement sent!", ephemeral: true });
 }
-});
 
 client.login(process.env.DISCORD_BOT_TOKEN);
