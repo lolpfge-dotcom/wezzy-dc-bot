@@ -219,7 +219,7 @@ client.on("messageCreate", async (message) => {
           "• Look for the invoice number\n\n" +
           "Subscribe to restock notifications with the button below!"
       )
-      .setThumbnail(null)
+      .setThumbnail("https://imgur.com/a/nz53254")
       .setFooter({ text: "wezzy.store - Premium Roblox Scripts" })
       .setTimestamp();
 
