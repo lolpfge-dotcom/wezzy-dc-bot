@@ -21,41 +21,54 @@ const client = new Client({
   ],
 });
 
-// Configuration
+// Configuration (cleaned - only what's needed)
 const CONFIG = {
   BUYER_ROLE_ID: process.env.BUYER_ROLE_ID,
   VERIFICATION_CHANNEL_ID: process.env.VERIFICATION_CHANNEL_ID,
-  SELLAPP_API_KEY: process.env.SELLAPP_API_KEY,
-  SELLAPP_STORE_ID: process.env.SELLAPP_STORE_ID,
   RESTOCK_ROLE_ID: process.env.RESTOCK_ROLE_ID,
   ANNOUNCEMENT_CHANNEL_ID: process.env.ANNOUNCEMENT_CHANNEL_ID,
 };
 
-// Verify order with Sellapp API
+// Verify order with Sellhub API
 async function verifyOrder(orderId) {
   try {
-    orderId = orderId.replace("#", "");
+    orderId = orderId.replace("#", "").trim();
 
-    const url = `https://sell.app/api/v2/invoices/${orderId}`;
+    if (!orderId) {
+      return { success: false, message: "Order ID is required" };
+    }
+
+    const url = `https://dash.sellhub.cx/api/sellhub/invoices?id=${encodeURIComponent(orderId)}`;
 
     const response = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${process.env.SELLAPP_API_KEY}`,
+        Authorization: process.env.SELLHUB_API_KEY,   // No "Bearer " prefix
         "Content-Type": "application/json",
       },
     });
 
     if (!response.ok) {
-      return { success: false, message: "Order not found" };
+      console.error(`Sellhub API error: ${response.status}`);
+      return { success: false, message: "Order not found or API error" };
     }
 
     const data = await response.json();
+    const invoices = data.data?.invoices || [];
 
-    const orderStatus = data.data?.status?.status?.status;
-    const customerEmail = data.data?.customer_information?.email;
-    const productName = data.data?.listing?.title;
+    const order = invoices.find(inv => 
+      inv.id === orderId || inv.id?.toString() === orderId
+    );
 
-    if (orderStatus === "COMPLETED" || orderStatus === "PAID") {
+    if (!order) {
+      return { success: false, message: "Order not found" };
+    }
+
+    const orderStatus = (order.status || "").toLowerCase();
+    const customerEmail = order.customer?.email || order.email;
+    const productName = order.product?.title || order.listing?.title || "Product";
+
+    // Accepted paid statuses (add more if your Sellhub shows different ones)
+    if (["paid", "completed", "fulfilled", "successful"].includes(orderStatus)) {
       return {
         success: true,
         order: {
@@ -66,9 +79,13 @@ async function verifyOrder(orderId) {
       };
     }
 
-    return { success: false, message: "Order not completed" };
+    return { 
+      success: false, 
+      message: `Order status is "${orderStatus || 'unknown'}" - must be paid/completed` 
+    };
+
   } catch (error) {
-    console.error("Error verifying order:", error);
+    console.error("Sellhub verification error:", error);
     return { success: false, message: "Error checking order" };
   }
 }
@@ -90,9 +107,9 @@ client.on("interactionCreate", async (interaction) => {
 
     const orderIdInput = new TextInputBuilder()
       .setCustomId("order_id")
-      .setLabel("Enter your Sellapp Order ID")
+      .setLabel("Enter your Sellhub Order ID")
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder("e.g., 12345678")
+      .setPlaceholder("e.g., inv_12345678")
       .setRequired(true)
       .setMinLength(5)
       .setMaxLength(50);
@@ -103,7 +120,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // Restock toggle - now shows notification BELOW the panel
+  // Restock toggle
   if (interaction.customId === "subscribe_restock") {
     await interaction.deferUpdate();
 
@@ -127,7 +144,6 @@ client.on("interactionCreate", async (interaction) => {
       statusText = "🔔 Restock notifications turned **ON**! You'll get pinged on restocks.";
     }
 
-    // Show short ephemeral notification BELOW the panel
     await interaction.followUp({
       content: statusText,
       flags: MessageFlags.Ephemeral,
@@ -164,7 +180,7 @@ client.on("interactionCreate", async (interaction) => {
             .setDescription(`Your order has been verified!\n\nYou've been given the **${role.name}** role.`)
             .addFields(
               { name: "Order ID", value: orderId, inline: true },
-              { name: "Status", value: "Verified", inline: true },
+              { name: "Status", value: result.order.status.toUpperCase(), inline: true },
             )
             .setTimestamp();
 
@@ -175,10 +191,7 @@ client.on("interactionCreate", async (interaction) => {
             .setColor("#ff0000")
             .setTitle("❌ Verification Failed")
             .setDescription(result.message || "Could not verify your order.")
-            .addFields(
-              { name: "Order ID", value: orderId, inline: true },
-              { name: "Status", value: "Failed", inline: true },
-            )
+            .addFields({ name: "Order ID", value: orderId, inline: true })
             .setFooter({ text: "Make sure your order is completed and the ID is correct." })
             .setTimestamp();
 
@@ -204,17 +217,16 @@ client.on("messageCreate", async (message) => {
 
         "**How to verify**\n" +
         "1. Click **Verify Order**\n" +
-        "2. Enter your Sellapp Order ID\n" +
+        "2. Enter your Sellhub Order ID\n" +
         "3. Receive buyer role instantly\n\n" +
 
         "**Finding your Order ID**\n" +
-        "• Sellapp purchase email receipt\n" +
-        "• Sellapp order history\n" +
+        "• Sellhub purchase email receipt\n" +
+        "• Sellhub order history\n" +
         "• Invoice number in dashboard\n\n" +
 
         "Subscribe to restock alerts below to be notified instantly when items become available again."
       )
-      .setThumbnail(null)
       .setFooter({ text: "wezzy.store • Premium Cheats" })
       .setTimestamp();
 
@@ -273,11 +285,7 @@ client.on("messageCreate", async (message) => {
     if (link) {
       link = link.replace(/^["']|["']$/g, '').trim();
       if (link.startsWith('http')) {
-        embed.addFields({
-          name: "Link",
-          value: `[Click to grab it](${link})`,
-          inline: false
-        });
+        embed.addFields({ name: "Link", value: `[Click to grab it](${link})`, inline: false });
       } else {
         embed.setDescription(embed.data.description + `\n\nLink: ${link}`);
       }
