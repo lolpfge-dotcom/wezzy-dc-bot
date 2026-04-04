@@ -29,7 +29,7 @@ const CONFIG = {
   ANNOUNCEMENT_CHANNEL_ID: process.env.ANNOUNCEMENT_CHANNEL_ID,
 };
 
-// Verify order with Sellhub API (Direct endpoint - best for UUIDs)
+// Verify order with Sellhub API (List endpoint + anti-block headers)
 async function verifyOrder(orderId) {
   try {
     orderId = orderId.replace("#", "").trim();
@@ -38,35 +38,42 @@ async function verifyOrder(orderId) {
       return { success: false, message: "Order ID is required" };
     }
 
-    const url = `https://dash.sellhub.cx/api/sellhub/invoices/${encodeURIComponent(orderId)}`;
+    const url = `https://dash.sellhub.cx/api/sellhub/invoices?id=${encodeURIComponent(orderId)}`;
 
-    console.log(`[DEBUG] Fetching Sellhub invoice: ${orderId}`);
+    console.log(`[DEBUG] Checking Sellhub invoice ID: ${orderId}`);
 
     const response = await fetch(url, {
       headers: {
         Authorization: process.env.SELLHUB_API_KEY,
         "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
       },
     });
 
-    console.log(`[DEBUG] API Status Code: ${response.status}`);
-
-    if (response.status === 404) {
-      return { success: false, message: "Order not found - please check the Invoice ID" };
-    }
+    console.log(`[DEBUG] API Response Status: ${response.status}`);
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "No details");
-      console.error(`[DEBUG] Sellhub API Error: ${response.status} - ${errorText}`);
+      const errorText = await response.text().catch(() => "No error body");
+      console.error(`[DEBUG] Sellhub Error Body: ${errorText.substring(0, 500)}`);
+
+      if (errorText.includes("Cloudflare") || errorText.includes("blocked") || response.status === 403) {
+        return { success: false, message: "Cloudflare blocked the request. Try again in 1-2 minutes." };
+      }
       return { success: false, message: `API error (${response.status})` };
     }
 
     const data = await response.json();
-    const order = data.data || data;   // Handle both possible response formats
+    const invoices = data.data?.invoices || [];
 
-    if (!order || !order.id) {
-      console.log(`[DEBUG] No order data returned`);
-      return { success: false, message: "Order not found" };
+    console.log(`[DEBUG] Found ${invoices.length} invoice(s) in response`);
+
+    const order = invoices.find(inv => 
+      inv.id === orderId || inv.id?.toString() === orderId
+    );
+
+    if (!order) {
+      return { success: false, message: "Order not found. Make sure you're using the exact Sellhub Invoice ID." };
     }
 
     const orderStatus = (order.status || "").toLowerCase();
@@ -75,7 +82,6 @@ async function verifyOrder(orderId) {
     const customerEmail = order.customer?.email || order.email;
     const productName = order.product?.title || order.listing?.title || "Product";
 
-    // Accepted paid statuses
     if (["paid", "completed", "fulfilled", "successful"].includes(orderStatus)) {
       return {
         success: true,
@@ -93,7 +99,7 @@ async function verifyOrder(orderId) {
     };
 
   } catch (error) {
-    console.error("[DEBUG] Sellhub verification exception:", error.message);
+    console.error("[DEBUG] Fetch exception:", error.message);
     return { success: false, message: "Error checking order with Sellhub" };
   }
 }
@@ -107,7 +113,7 @@ client.on("ready", () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton() && !interaction.isModalSubmit()) return;
 
-  // Verify button - opens modal
+  // Verify button
   if (interaction.customId === "verify_order") {
     const modal = new ModalBuilder()
       .setCustomId("order_verification_modal")
@@ -140,13 +146,14 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    let statusText = "";
+    let statusText = member.roles.cache.has(CONFIG.RESTOCK_ROLE_ID)
+      ? "🔔 Restock notifications turned **OFF**."
+      : "🔔 Restock notifications turned **ON**! You'll get pinged on restocks.";
+
     if (member.roles.cache.has(CONFIG.RESTOCK_ROLE_ID)) {
       await member.roles.remove(role);
-      statusText = "🔔 Restock notifications turned **OFF**.";
     } else {
       await member.roles.add(role);
-      statusText = "🔔 Restock notifications turned **ON**! You'll get pinged on restocks.";
     }
 
     await interaction.followUp({ content: statusText, flags: MessageFlags.Ephemeral });
@@ -165,13 +172,11 @@ client.on("interactionCreate", async (interaction) => {
           const role = interaction.guild.roles.cache.get(CONFIG.BUYER_ROLE_ID);
 
           if (!role) {
-            await interaction.editReply({ content: "❌ Buyer role not found.", flags: MessageFlags.Ephemeral });
-            return;
+            return interaction.editReply({ content: "❌ Buyer role not found.", flags: MessageFlags.Ephemeral });
           }
 
           if (member.roles.cache.has(CONFIG.BUYER_ROLE_ID)) {
-            await interaction.editReply({ content: "✅ You already have the buyer role!", flags: MessageFlags.Ephemeral });
-            return;
+            return interaction.editReply({ content: "✅ You already have the buyer role!", flags: MessageFlags.Ephemeral });
           }
 
           await member.roles.add(role);
@@ -182,7 +187,7 @@ client.on("interactionCreate", async (interaction) => {
             .setDescription(`Your order has been verified!\n\nYou've been given the **${role.name}** role.`)
             .addFields(
               { name: "Order ID", value: orderId, inline: true },
-              { name: "Status", value: result.order.status.toUpperCase(), inline: true },
+              { name: "Status", value: result.order.status.toUpperCase(), inline: true }
             )
             .setTimestamp();
 
@@ -192,9 +197,9 @@ client.on("interactionCreate", async (interaction) => {
           const errorEmbed = new EmbedBuilder()
             .setColor("#ff0000")
             .setTitle("❌ Verification Failed")
-            .setDescription(result.message || "Could not verify your order.")
+            .setDescription(result.message)
             .addFields({ name: "Order ID", value: orderId, inline: true })
-            .setFooter({ text: "Make sure your order is completed and the ID is correct." })
+            .setFooter({ text: "Make sure the order is completed and the ID is correct." })
             .setTimestamp();
 
           await interaction.editReply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
@@ -203,31 +208,27 @@ client.on("interactionCreate", async (interaction) => {
       })
       .catch((error) => {
         console.error("Verification error:", error);
-        interaction.editReply({ content: "❌ An error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
+        interaction.editReply({ content: "❌ An unexpected error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
       });
   }
 });
 
 client.on("messageCreate", async (message) => {
-  // Setup panel
   if (message.content === "!setup-panel" && message.member.permissions.has("Administrator")) {
     const embed = new EmbedBuilder()
       .setColor("#101418")
       .setTitle("Order Verification")
       .setDescription(
         "Verify your purchase to access exclusive buyer channels.\n\n" +
-
         "**How to verify**\n" +
         "1. Click **Verify Order**\n" +
         "2. Enter your Sellhub Invoice ID\n" +
         "3. Receive buyer role instantly\n\n" +
-
         "**Finding your Invoice ID**\n" +
-        "• Sellhub purchase email receipt\n" +
-        "• Sellhub order history\n" +
-        "• Invoice section in your dashboard\n\n" +
-
-        "Subscribe to restock alerts below to be notified instantly when items become available again."
+        "• Check your Sellhub purchase email\n" +
+        "• Go to Sellhub Dashboard → Orders / Invoices\n" +
+        "• Copy the long Invoice ID (UUID format)\n\n" +
+        "Subscribe to restock alerts below."
       )
       .setFooter({ text: "wezzy.store • Premium Cheats" })
       .setTimestamp();
@@ -250,7 +251,7 @@ client.on("messageCreate", async (message) => {
     await message.delete().catch(() => {});
   }
 
-  // Restock announcement
+  // Restock announcement command (unchanged)
   if (message.content.startsWith("!announce-restock") && message.member.permissions.has("Administrator")) {
     await message.delete().catch(() => {});
 
@@ -273,9 +274,7 @@ client.on("messageCreate", async (message) => {
 
     const roleId = CONFIG.RESTOCK_ROLE_ID;
     const role = message.guild.roles.cache.get(roleId);
-    if (!role) {
-      return message.reply({ content: "❌ Restock role not found.", flags: MessageFlags.Ephemeral });
-    }
+    if (!role) return message.reply({ content: "❌ Restock role not found.", flags: MessageFlags.Ephemeral });
 
     const embed = new EmbedBuilder()
       .setColor("#ff8800")
@@ -297,9 +296,7 @@ client.on("messageCreate", async (message) => {
       ? message.guild.channels.cache.get(CONFIG.ANNOUNCEMENT_CHANNEL_ID)
       : message.channel;
 
-    if (!channel) {
-      return message.reply({ content: "❌ Announcement channel not found.", flags: MessageFlags.Ephemeral });
-    }
+    if (!channel) return message.reply({ content: "❌ Announcement channel not found.", flags: MessageFlags.Ephemeral });
 
     await channel.send({
       content: `<@&${roleId}>`,
