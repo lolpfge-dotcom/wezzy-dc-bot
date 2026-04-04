@@ -21,7 +21,7 @@ const client = new Client({
   ],
 });
 
-// Configuration (cleaned - only what's needed)
+// Configuration
 const CONFIG = {
   BUYER_ROLE_ID: process.env.BUYER_ROLE_ID,
   VERIFICATION_CHANNEL_ID: process.env.VERIFICATION_CHANNEL_ID,
@@ -29,7 +29,7 @@ const CONFIG = {
   ANNOUNCEMENT_CHANNEL_ID: process.env.ANNOUNCEMENT_CHANNEL_ID,
 };
 
-// Verify order with Sellhub API
+// Verify order with Sellhub API (Direct endpoint - best for UUIDs)
 async function verifyOrder(orderId) {
   try {
     orderId = orderId.replace("#", "").trim();
@@ -38,36 +38,44 @@ async function verifyOrder(orderId) {
       return { success: false, message: "Order ID is required" };
     }
 
-    const url = `https://dash.sellhub.cx/api/sellhub/invoices?id=${encodeURIComponent(orderId)}`;
+    const url = `https://dash.sellhub.cx/api/sellhub/invoices/${encodeURIComponent(orderId)}`;
+
+    console.log(`[DEBUG] Fetching Sellhub invoice: ${orderId}`);
 
     const response = await fetch(url, {
       headers: {
-        Authorization: process.env.SELLHUB_API_KEY,   // No "Bearer " prefix
+        Authorization: process.env.SELLHUB_API_KEY,
         "Content-Type": "application/json",
       },
     });
 
+    console.log(`[DEBUG] API Status Code: ${response.status}`);
+
+    if (response.status === 404) {
+      return { success: false, message: "Order not found - please check the Invoice ID" };
+    }
+
     if (!response.ok) {
-      console.error(`Sellhub API error: ${response.status}`);
-      return { success: false, message: "Order not found or API error" };
+      const errorText = await response.text().catch(() => "No details");
+      console.error(`[DEBUG] Sellhub API Error: ${response.status} - ${errorText}`);
+      return { success: false, message: `API error (${response.status})` };
     }
 
     const data = await response.json();
-    const invoices = data.data?.invoices || [];
+    const order = data.data || data;   // Handle both possible response formats
 
-    const order = invoices.find(inv => 
-      inv.id === orderId || inv.id?.toString() === orderId
-    );
-
-    if (!order) {
+    if (!order || !order.id) {
+      console.log(`[DEBUG] No order data returned`);
       return { success: false, message: "Order not found" };
     }
 
     const orderStatus = (order.status || "").toLowerCase();
+    console.log(`[DEBUG] Order found - Status: ${orderStatus}`);
+
     const customerEmail = order.customer?.email || order.email;
     const productName = order.product?.title || order.listing?.title || "Product";
 
-    // Accepted paid statuses (add more if your Sellhub shows different ones)
+    // Accepted paid statuses
     if (["paid", "completed", "fulfilled", "successful"].includes(orderStatus)) {
       return {
         success: true,
@@ -81,12 +89,12 @@ async function verifyOrder(orderId) {
 
     return { 
       success: false, 
-      message: `Order status is "${orderStatus || 'unknown'}" - must be paid/completed` 
+      message: `Order found but status is "${orderStatus}" (must be paid or completed)` 
     };
 
   } catch (error) {
-    console.error("Sellhub verification error:", error);
-    return { success: false, message: "Error checking order" };
+    console.error("[DEBUG] Sellhub verification exception:", error.message);
+    return { success: false, message: "Error checking order with Sellhub" };
   }
 }
 
@@ -95,7 +103,7 @@ client.on("ready", () => {
   console.log("🚀 Discord verification bot is ready!");
 });
 
-// Handle button interactions and modal submits
+// Handle interactions
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton() && !interaction.isModalSubmit()) return;
 
@@ -103,13 +111,13 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.customId === "verify_order") {
     const modal = new ModalBuilder()
       .setCustomId("order_verification_modal")
-      .setTitle("Order Verification");
+      .setTitle("Sellhub Order Verification");
 
     const orderIdInput = new TextInputBuilder()
       .setCustomId("order_id")
-      .setLabel("Enter your Sellhub Order ID")
+      .setLabel("Enter your Sellhub Invoice ID")
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder("e.g., inv_12345678")
+      .setPlaceholder("e.g., d73b9e4d-56e5-4e0f-91fe-e9f1eb327764")
       .setRequired(true)
       .setMinLength(5)
       .setMaxLength(50);
@@ -128,10 +136,7 @@ client.on("interactionCreate", async (interaction) => {
     const role = interaction.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
 
     if (!role) {
-      await interaction.followUp({
-        content: "❌ Restock role not found.",
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.followUp({ content: "❌ Restock role not found.", flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -144,13 +149,10 @@ client.on("interactionCreate", async (interaction) => {
       statusText = "🔔 Restock notifications turned **ON**! You'll get pinged on restocks.";
     }
 
-    await interaction.followUp({
-      content: statusText,
-      flags: MessageFlags.Ephemeral,
-    });
+    await interaction.followUp({ content: statusText, flags: MessageFlags.Ephemeral });
   }
 
-  // Modal submit (verification)
+  // Modal submit
   if (interaction.customId === "order_verification_modal") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -217,13 +219,13 @@ client.on("messageCreate", async (message) => {
 
         "**How to verify**\n" +
         "1. Click **Verify Order**\n" +
-        "2. Enter your Sellhub Order ID\n" +
+        "2. Enter your Sellhub Invoice ID\n" +
         "3. Receive buyer role instantly\n\n" +
 
-        "**Finding your Order ID**\n" +
+        "**Finding your Invoice ID**\n" +
         "• Sellhub purchase email receipt\n" +
         "• Sellhub order history\n" +
-        "• Invoice number in dashboard\n\n" +
+        "• Invoice section in your dashboard\n\n" +
 
         "Subscribe to restock alerts below to be notified instantly when items become available again."
       )
@@ -305,10 +307,7 @@ client.on("messageCreate", async (message) => {
       allowedMentions: { parse: ['roles'] }
     });
 
-    await message.reply({
-      content: "✅ Announcement sent!",
-      flags: MessageFlags.Ephemeral
-    }).catch(() => {});
+    await message.reply({ content: "✅ Announcement sent!", flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 });
 
