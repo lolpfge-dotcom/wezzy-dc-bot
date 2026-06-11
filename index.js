@@ -1,0 +1,503 @@
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  MessageFlags,
+  AttachmentBuilder,
+} = require("discord.js");
+const fs = require("fs");
+const path = require("path");
+require("dotenv").config();
+
+// ---------------------------------------------------------------------------
+// Config + startup validation
+// ---------------------------------------------------------------------------
+const CONFIG = {
+  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+  SELLAUTH_API_KEY: process.env.SELLAUTH_API_KEY,
+  SELLAUTH_SHOP_ID: process.env.SELLAUTH_SHOP_ID,
+  BUYER_ROLE_ID: process.env.BUYER_ROLE_ID,
+  RESTOCK_ROLE_ID: process.env.RESTOCK_ROLE_ID,
+  VERIFICATION_CHANNEL_ID: process.env.VERIFICATION_CHANNEL_ID,
+  ANNOUNCEMENT_CHANNEL_ID: process.env.ANNOUNCEMENT_CHANNEL_ID,
+  STORE_URL: process.env.STORE_URL || "https://wezzy.store",
+  STORE_LOGO_URL: process.env.STORE_LOGO_URL || null,
+  STORE_BANNER_URL: process.env.STORE_BANNER_URL || null,
+  BANNER_FILE: process.env.BANNER_FILE || null,
+};
+
+// Fail fast with a clear message if something essential is missing.
+const required = ["DISCORD_TOKEN", "SELLAUTH_API_KEY", "SELLAUTH_SHOP_ID", "BUYER_ROLE_ID", "RESTOCK_ROLE_ID"];
+const missing = required.filter((k) => !CONFIG[k]);
+if (missing.length) {
+  console.error(`❌ Missing required values in .env: ${missing.join(", ")}`);
+  console.error("   Fill them in and restart. See .env.example for the full list.");
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// Persistence: remember which order IDs were already claimed (anti-reuse)
+// Stored as a JSON file next to the bot: { "<orderId>": "<discordUserId>" }
+// ---------------------------------------------------------------------------
+const CLAIMS_FILE = path.join(__dirname, "claimed_orders.json");
+
+function loadClaims() {
+  try {
+    return JSON.parse(fs.readFileSync(CLAIMS_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveClaims(claims) {
+  try {
+    fs.writeFileSync(CLAIMS_FILE, JSON.stringify(claims, null, 2));
+  } catch (err) {
+    console.error("[CLAIMS] Could not save claims file:", err.message);
+  }
+}
+
+let claimedOrders = loadClaims();
+
+// Simple per-user cooldown to slow down brute-forcing of order IDs (ms).
+const VERIFY_COOLDOWN_MS = 15_000;
+const lastVerifyAttempt = new Map();
+
+// ---------------------------------------------------------------------------
+// Discord client
+// ---------------------------------------------------------------------------
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+// ---------------------------------------------------------------------------
+// SellAuth order verification
+// Looks up a single invoice by its ID or unique ID via the official API.
+// Optionally cross-checks the Discord ID SellAuth recorded on the order.
+// ---------------------------------------------------------------------------
+async function verifyOrder(orderId, discordUserId = null, retries = 2) {
+  try {
+    orderId = String(orderId).replace("#", "").trim();
+    if (!orderId) return { success: false, message: "Order ID is required." };
+
+    const url = `https://api.sellauth.com/v1/shops/${CONFIG.SELLAUTH_SHOP_ID}/invoices/${encodeURIComponent(orderId)}`;
+    console.log(`[VERIFY] Looking up SellAuth invoice: ${orderId}`);
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${CONFIG.SELLAUTH_API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    });
+    console.log(`[VERIFY] Status: ${response.status}`);
+
+    // Rate limited -> brief wait and retry
+    if (response.status === 429 && retries > 0) {
+      console.log("[VERIFY] Rate limited — waiting 3s before retry...");
+      await new Promise((r) => setTimeout(r, 3000));
+      return verifyOrder(orderId, discordUserId, retries - 1);
+    }
+
+    if (response.status === 404) {
+      return {
+        success: false,
+        message: "Order not found. Make sure you copied the exact Order ID from your SellAuth confirmation.",
+      };
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      console.error(`[VERIFY] Error body: ${errorText.substring(0, 300)}`);
+      return { success: false, message: "Couldn't reach the store right now. Please try again in a minute." };
+    }
+
+    const order = await response.json();
+
+    if (!order || order.success === false || !order.id) {
+      return { success: false, message: "Order not found. Double-check your Order ID." };
+    }
+
+    const status = String(order.status || "").toLowerCase().trim();
+    console.log(`[VERIFY] Invoice ${order.id} status: ${status}`);
+
+    if (!["completed", "paid"].includes(status)) {
+      return {
+        success: false,
+        message: `Order found, but its status is "${status || "unknown"}". It must be completed/paid.`,
+      };
+    }
+
+    // Stronger check: if SellAuth recorded a Discord ID on the order,
+    // it must match the person verifying.
+    const orderDiscordId = order.customer?.discord_id || null;
+    if (orderDiscordId && discordUserId && String(orderDiscordId) !== String(discordUserId)) {
+      return {
+        success: false,
+        message: "This order is linked to a different Discord account, so it can't be verified here.",
+      };
+    }
+
+    const productName = order.items?.[0]?.product?.name || "Product";
+
+    return {
+      success: true,
+      order: {
+        id: String(order.id),
+        customerEmail: order.email || order.customer?.email || null,
+        productName,
+        status,
+      },
+    };
+  } catch (error) {
+    console.error("[VERIFY] Exception:", error.message);
+    return { success: false, message: "Error connecting to the store. Please try again later." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ready
+// ---------------------------------------------------------------------------
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log("🚀 wezzy.store verification bot is ready!");
+});
+
+// ---------------------------------------------------------------------------
+// Interactions (buttons + modal)
+// ---------------------------------------------------------------------------
+client.on("interactionCreate", async (interaction) => {
+  try {
+    if (!interaction.inGuild()) return;
+    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+
+    // Open verification modal
+    if (interaction.customId === "verify_order") {
+      const modal = new ModalBuilder()
+        .setCustomId("order_verification_modal")
+        .setTitle("Wezzy Order Verification");
+
+      const orderIdInput = new TextInputBuilder()
+        .setCustomId("order_id")
+        .setLabel("Enter your Wezzy Order ID")
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder("e.g. 971 or ba1181294bc7a-0000000000971")
+        .setRequired(true)
+        .setMinLength(5)
+        .setMaxLength(50);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(orderIdInput));
+      return interaction.showModal(modal);
+    }
+
+    // Restock alerts toggle
+    if (interaction.customId === "subscribe_restock") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const role = interaction.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
+      if (!role) {
+        return interaction.editReply({ content: "❌ Restock role not found. Ping an admin." });
+      }
+
+      const member = interaction.member;
+      try {
+        if (member.roles.cache.has(CONFIG.RESTOCK_ROLE_ID)) {
+          await member.roles.remove(role);
+          return interaction.editReply({ content: "🔔 Restock notifications turned **OFF**." });
+        }
+        await member.roles.add(role);
+        return interaction.editReply({
+          content: "🔔 Restock notifications turned **ON**! You'll get pinged on restocks.",
+        });
+      } catch (err) {
+        console.error("[RESTOCK] Role toggle failed:", err.message);
+        return interaction.editReply({
+          content:
+            "❌ I couldn't change your role. My role may be **below** the restock role — ask an admin to move it up.",
+        });
+      }
+    }
+
+    // Process verification modal
+    if (interaction.customId === "order_verification_modal") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      // Cooldown to slow down guessing
+      const now = Date.now();
+      const last = lastVerifyAttempt.get(interaction.user.id) || 0;
+      if (now - last < VERIFY_COOLDOWN_MS) {
+        const wait = Math.ceil((VERIFY_COOLDOWN_MS - (now - last)) / 1000);
+        return interaction.editReply({ content: `⏳ Please wait ${wait}s before trying again.` });
+      }
+      lastVerifyAttempt.set(interaction.user.id, now);
+
+      const orderId = interaction.fields.getTextInputValue("order_id").replace("#", "").trim();
+      const result = await verifyOrder(orderId, interaction.user.id);
+
+      if (!result.success) {
+        const errorEmbed = new EmbedBuilder()
+          .setColor("#2f3136")
+          .setTitle("Verification unsuccessful")
+          .setDescription(`> ${result.message}`)
+          .addFields(
+            { name: "Order ID", value: `\`${orderId || "—"}\``, inline: true },
+            { name: "Result", value: "🔴 Not verified", inline: true }
+          )
+          .setFooter({
+            text: "Wezzy · Verification",
+            iconURL: CONFIG.STORE_LOGO_URL || undefined,
+          })
+          .setTimestamp();
+        console.log(`❌ Failed verification for ${interaction.user.tag} (${orderId})`);
+        return interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      // Anti-reuse: has this order already been claimed by someone else?
+      const claimedBy = claimedOrders[result.order.id];
+      if (claimedBy && claimedBy !== interaction.user.id) {
+        console.log(`⚠️ Order ${orderId} already claimed by ${claimedBy}, blocked ${interaction.user.id}`);
+        return interaction.editReply({
+          content:
+            "❌ This order has already been used to verify a different account. Each order can only be claimed once.",
+        });
+      }
+
+      const role = interaction.guild.roles.cache.get(CONFIG.BUYER_ROLE_ID);
+      if (!role) {
+        return interaction.editReply({ content: "❌ Buyer role not found. Ping an admin." });
+      }
+
+      const member = interaction.member;
+      if (member.roles.cache.has(CONFIG.BUYER_ROLE_ID)) {
+        // Make sure their order is recorded even if they already had the role
+        claimedOrders[result.order.id] = interaction.user.id;
+        saveClaims(claimedOrders);
+        return interaction.editReply({ content: "✅ You already have the buyer role!" });
+      }
+
+      try {
+        await member.roles.add(role);
+      } catch (err) {
+        console.error("[VERIFY] Could not add buyer role:", err.message);
+        return interaction.editReply({
+          content:
+            "❌ I verified your order but couldn't give the role. My role may be **below** the buyer role — ask an admin to move it up.",
+        });
+      }
+
+      // Record the claim so the same order can't be reused
+      claimedOrders[result.order.id] = interaction.user.id;
+      saveClaims(claimedOrders);
+
+      const successEmbed = new EmbedBuilder()
+        .setColor("#2f3136")
+        .setTitle("Verification successful")
+        .setDescription(
+          `> Welcome to **Wezzy**. Your purchase has been confirmed and your access is now active.`
+        )
+        .addFields(
+          { name: "Order ID", value: `\`${result.order.id}\``, inline: true },
+          { name: "Status", value: "🟢 " + result.order.status.toUpperCase(), inline: true },
+          { name: "Role granted", value: `<@&${role.id}>`, inline: false }
+        )
+        .setFooter({
+          text: "Wezzy · Verification",
+          iconURL: CONFIG.STORE_LOGO_URL || undefined,
+        })
+        .setTimestamp();
+
+      console.log(`✅ Verified ${interaction.user.tag} with order ${result.order.id}`);
+      return interaction.editReply({ embeds: [successEmbed] });
+    }
+  } catch (err) {
+    console.error("[INTERACTION] Unhandled error:", err);
+    // Best-effort reply so the user isn't left hanging
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: "❌ Something went wrong. Please try again." });
+      } else if (interaction.isRepliable()) {
+        await interaction.reply({ content: "❌ Something went wrong. Please try again.", flags: MessageFlags.Ephemeral });
+      }
+    } catch {}
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Admin text commands
+// ---------------------------------------------------------------------------
+client.on("messageCreate", async (message) => {
+  try {
+    if (!message.guild || !message.member || message.author.bot) return;
+    const isAdmin = message.member.permissions.has("Administrator");
+
+    // Setup verification panel
+    if (message.content === "!setup-panel" && isAdmin) {
+      const embed = new EmbedBuilder()
+        .setColor("#2f3136")
+        .setTitle("Order Verification")
+        .setDescription(
+          "Confirm your **Wezzy** purchase to unlock buyer-only channels and product updates."
+        )
+        .addFields(
+          {
+            name: "How it works",
+            value:
+              "`1.` Press **Verify Order** below.\n" +
+              "`2.` Paste your Wezzy Order ID.\n" +
+              "`3.` Your buyer role is granted automatically.",
+            inline: false,
+          },
+          {
+            name: "Finding your Order ID",
+            value:
+              "• Your purchase confirmation email\n" +
+              "• Or your order page on **wezzy.store**\n" +
+              "• Copy the Order / Invoice ID exactly",
+            inline: false,
+          },
+          {
+            name: "Extras",
+            value:
+              "Tap **Restock Alerts** to be pinged whenever something drops back in stock.",
+            inline: false,
+          }
+        )
+        .setFooter({
+          text: "Wezzy · Verification",
+          iconURL: CONFIG.STORE_LOGO_URL || undefined,
+        });
+
+      if (CONFIG.STORE_LOGO_URL) embed.setThumbnail(CONFIG.STORE_LOGO_URL);
+
+      const verifyButton = new ButtonBuilder()
+        .setCustomId("verify_order")
+        .setLabel("Verify Order")
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji("🔑");
+
+      const restockButton = new ButtonBuilder()
+        .setCustomId("subscribe_restock")
+        .setLabel("Restock Alerts")
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji("🔔");
+
+      const storeButton = new ButtonBuilder()
+        .setLabel("Visit store")
+        .setStyle(ButtonStyle.Link)
+        .setEmoji("🛍️")
+        .setURL(CONFIG.STORE_URL);
+
+      const row = new ActionRowBuilder().addComponents(verifyButton, restockButton, storeButton);
+      await message.channel.send({ embeds: [embed], components: [row] });
+      return message.delete().catch(() => {});
+    }
+
+    // Restock announcement:  !announce-restock "Product Name" https://link
+    if (message.content.startsWith("!announce-restock") && isAdmin) {
+      await message.delete().catch(() => {});
+
+      let rest = message.content.slice("!announce-restock".length).trim();
+      let product = "Product";
+      let link = "";
+      let image = "";
+
+      if (rest.startsWith('"') || rest.startsWith("'")) {
+        const quote = rest[0];
+        const end = rest.indexOf(quote, 1);
+        if (end !== -1) {
+          product = rest.slice(1, end).trim();
+          rest = rest.slice(end + 1).trim();
+        }
+      } else {
+        const parts = rest.split(/\s+/);
+        product = parts.shift() || "Product";
+        rest = parts.join(" ");
+      }
+
+      // From what's left: first URL = buy link, second URL = banner image
+      const urls = rest.split(/\s+/).filter(Boolean).map((u) => u.replace(/^["']|["']$/g, ""));
+      link = urls.find((u) => u.startsWith("http")) || "";
+      image = urls.filter((u) => u.startsWith("http"))[1] || "";
+
+      const role = message.guild.roles.cache.get(CONFIG.RESTOCK_ROLE_ID);
+      if (!role) {
+        return message.channel.send("❌ Restock role not found.").then((m) =>
+          setTimeout(() => m.delete().catch(() => {}), 5000)
+        );
+      }
+
+      const buyUrl = link && link.startsWith("http") ? link : CONFIG.STORE_URL;
+      const announceFiles = [];
+
+      const embed = new EmbedBuilder()
+        .setColor("#2f3136")
+        .setTitle("Restock")
+        .setDescription(
+          `### ${product}\n` +
+            `Available now at **Wezzy** — limited quantity, first come, first served.`
+        )
+        .addFields(
+          { name: "Status", value: "🟢 In stock", inline: true },
+          { name: "Where", value: `[wezzy.store](${CONFIG.STORE_URL})`, inline: true }
+        )
+        .setFooter({
+          text: "Wezzy · Restock notice",
+          iconURL: CONFIG.STORE_LOGO_URL || undefined,
+        })
+        .setTimestamp();
+
+      if (CONFIG.STORE_LOGO_URL) embed.setThumbnail(CONFIG.STORE_LOGO_URL);
+
+      const buttons = [
+        new ButtonBuilder().setLabel("Get it now").setEmoji("🛒").setStyle(ButtonStyle.Link).setURL(buyUrl),
+      ];
+      if (buyUrl !== CONFIG.STORE_URL) {
+        buttons.push(
+          new ButtonBuilder().setLabel("Browse store").setEmoji("🛍️").setStyle(ButtonStyle.Link).setURL(CONFIG.STORE_URL)
+        );
+      }
+      const buttonRow = new ActionRowBuilder().addComponents(...buttons);
+
+      const channel = CONFIG.ANNOUNCEMENT_CHANNEL_ID
+        ? message.guild.channels.cache.get(CONFIG.ANNOUNCEMENT_CHANNEL_ID)
+        : message.channel;
+
+      if (!channel) {
+        return message.channel.send("❌ Announcement channel not found.").then((m) =>
+          setTimeout(() => m.delete().catch(() => {}), 5000)
+        );
+      }
+
+      await channel.send({
+        content: `<@&${CONFIG.RESTOCK_ROLE_ID}>`,
+        embeds: [embed],
+        components: [buttonRow],
+        files: announceFiles,
+        allowedMentions: { parse: ["roles"] },
+      });
+    }
+  } catch (err) {
+    console.error("[MESSAGE] Unhandled error:", err.message);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Safety nets so a stray error never kills the process silently
+// ---------------------------------------------------------------------------
+process.on("unhandledRejection", (reason) => console.error("[UNHANDLED REJECTION]", reason));
+process.on("uncaughtException", (err) => console.error("[UNCAUGHT EXCEPTION]", err));
+
+client.login(CONFIG.DISCORD_TOKEN).catch((err) => {
+  console.error("❌ Failed to log in. Check your DISCORD_TOKEN in .env. Details:", err.message);
+  process.exit(1);
+});
